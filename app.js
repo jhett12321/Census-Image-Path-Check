@@ -11,17 +11,17 @@ var serviceID = config.dbgServiceID;
 
 var badURLOutput = config.badURLOutput;
 var noURLOutput = config.noURLOutput;
-var count = config.itemsPerQuery;
+var count = config.listItemsPerQuery;
 
 //Output files
 var badURLWStream = fs.createWriteStream(badURLOutput, {flags: 'w+'});
 var noURLWStream = fs.createWriteStream(noURLOutput, {flags: 'w+'});
 
-badURLWStream.write("Item ID, Item Name, Image Path\n");
-noURLWStream.write("Item ID, Item Name\n");
+badURLWStream.write(config.endpointItemDisplayName + " ID, " + config.endpointItemDisplayName + " Name, Image Path\n");
+noURLWStream.write(config.endpointItemDisplayName + " ID, " + config.endpointItemDisplayName + " Name\n");
 
 // Item Queries
-console.log("Validating Image Paths for Census Items.");
+console.log("Validating Image Paths for Census endpoint: " + config.endpoint);
 
 var lastReturned = 0;
 var start = 0;
@@ -29,7 +29,7 @@ var start = 0;
 var itemsToProcess = 0;
 var itemsProcessed = 0;
 
-var countURL = "http://census.daybreakgames.com/s:" + serviceID + "/count/ps2:v2/item";
+var countURL = "http://census.daybreakgames.com/s:" + serviceID + "/count" + config.endpoint;
 
 http.get(countURL, function(res)
 {
@@ -54,15 +54,15 @@ http.get(countURL, function(res)
         }
 
         itemsToProcess = data.count;
-        console.log("Checking " + itemsToProcess + " Items.");
+        console.log("Validating " + itemsToProcess + " Image paths.");
         QueryItems();
     })
 });
 
 function QueryItems()
 {
-    //Perform Census Query for Items.
-    var url = "http://census.daybreakgames.com/s:" + serviceID + "/get/ps2:v2/item?c:start=" + start + "&c:limit=" + count;
+    //Perform Census Query on endpoint items.
+    var url = "http://census.daybreakgames.com/s:" + serviceID + "/get/" + config.endpoint + "?c:start=" + start + "&c:limit=" + count;
 
     http.get(url, function(res)
     {
@@ -88,22 +88,24 @@ function QueryItems()
 
             lastReturned = data.returned;
 
-            for(var i=0; i<data.item_list.length; i++)
+            for(var i=0; i<data[config.endpointWrapper].length; i++)
             {
-                var item = data.item_list[i];
+                var item = data[config.endpointWrapper][i];
 
-                if(item.image_path == undefined || item.image_path == null)
+                if(item[config.imagePathField] == undefined || item[config.imagePathField] == null)
                 {
                     //This item does not have a defined image path. Add to No URL CSV.
                     if(item.name != undefined)
                     {
-                        console.log("Item " + item.name.en + " (Item ID: " + item.item_id + ") does not have an image path!");
-                        noURLWStream.write(item.item_id + "," + item.name.en + "\n");
+                        var itemName = config.itemNameField.split('.').reduce(index, item);
+
+                        console.log(config.endpointItemDisplayName + " " + itemName + " (" + config.endpointItemDisplayName + " ID: " + item[config.itemIDField] + ") does not have an image path!");
+                        noURLWStream.write(item[config.itemIDField] + "," + itemName + "\n");
                     }
                     else
                     {
-                        console.log("Unknown Item (Item ID: " + item.item_id + ") does not have an image path!");
-                        noURLWStream.write(item.item_id + "," + "\n");
+                        console.log("Unknown " + config.endpointItemDisplayName + " (" + config.endpointItemDisplayName + " ID: " + item[config.itemIDField] + ") does not have an image path!");
+                        noURLWStream.write(item[config.itemIDField] + "," + "\n");
                     }
 
                     ItemProcessed();
@@ -119,7 +121,7 @@ function QueryItems()
 
 function QueryImagePath(item)
 {
-    var url = "http://census.daybreakgames.com" + item.image_path;
+    var url = config.basePath + item[config.imagePathField];
     request(url, {method: 'HEAD'}, function(err, res, body)
     {
         if(err)
@@ -133,14 +135,16 @@ function QueryImagePath(item)
             //This item references a image path that does not exist.
             if(item.name != undefined)
             {
-                console.log("Item " + item.name.en + " (Item ID: " + item.item_id + ") references a missing image!");
-                badURLWStream.write(item.item_id + "," + item.name.en + "," + item.image_path + "\n");
+                var itemName = config.itemNameField.split('.').reduce(index, item);
+
+                console.log(config.endpointItemDisplayName + " " + itemName + " (" + config.endpointItemDisplayName + " ID: " + item[config.itemIDField] + ") references a missing image!");
+                badURLWStream.write(item[config.itemIDField] + "," + itemName + "," + item[config.imagePathField] + "\n");
             }
 
             else
             {
-                console.log("Unknown Item (Item ID: " + item.item_id + ") references a missing image!");
-                badURLWStream.write(item.item_id + ",," + item.image_path + "\n");
+                console.log("Unknown " + config.endpointItemDisplayName + " (" + config.endpointItemDisplayName + " ID: " + item[config.itemIDField] + ") references a missing image!");
+                badURLWStream.write(item[config.itemIDField] + ",," + item[config.imagePathField] + "\n");
             }
         }
 
@@ -154,13 +158,13 @@ function ItemProcessed()
 
     var itemsRemaining = itemsToProcess - itemsProcessed;
 
-    console.log("Items Remaining: " + itemsRemaining);
+    console.log(config.endpointItemDisplayName +"s Remaining: " + itemsRemaining);
 
     //Get the next chunk of items when we have finished processing the current list.
-    if(itemsProcessed - start == config.itemsPerQuery)
+    if(itemsProcessed - start == config.listItemsPerQuery)
     {
         start += lastReturned;
-        if(lastReturned == config.itemsPerQuery)
+        if(lastReturned == config.listItemsPerQuery)
         {
             QueryItems();
         }
@@ -177,5 +181,10 @@ function ProcessingComplete()
     noURLWStream.end();
     badURLWStream.end();
 
-    console.log("Item Validation Complete");
+    console.log(config.endpointItemDisplayName + " Validation Complete");
+}
+
+function index(obj,i)
+{
+    return obj[i]
 }
